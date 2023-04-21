@@ -5,10 +5,6 @@ const jwtGenerator = require('../utils/jwt.js')
 const validinfo = require('../middleware/validinfo.js')
 const auth = require('../middleware/auth.js')
 const sendmail = require('../sendmail/email.js')
-const { query } = require("express")
-
-
-
 
 
 router.post("/register", validinfo, async (req, res) => {
@@ -40,7 +36,7 @@ router.post("/register", validinfo, async (req, res) => {
 
     } catch (err) {
 
-        console.error(err.message)
+        //console.error(err.message)
         res.status(500).send("Server error!")
 
     }
@@ -50,20 +46,31 @@ router.post("/login", validinfo, async (req, res) => {
     try {
         const { email, password } = req.body
 
-
-        const user = await pool.query("SELECT*FROM users WHERE user_email = $1", [
-            email
-        ])
+        const user = await pool.query("SELECT*FROM users WHERE user_email = $1 AND status = 1", [email])
+        const check_count = await pool.query("SELECT check_login FROM users WHERE user_email = $1", [email])
         if (user.rows.length === 0) {
-            return res.status(401).json("Email khong hop le !")
+            await pool.query("UPDATE users SET check_login = check_login +1 WHERE user_email = $1", [email])
+            res.status(402).send("Email khong dung hoac tai khoan chua duoc kich hoat !")
+            if (check_count.rows[0].check_login >= 5) {
+                //console.log(check_count.rows);
+                await pool.query("UPDATE users SET status = 0 WHERE user_email = $1", [email])
+                return res.status(403).send("Tai khoan ban da bi khoa vi vuot qua so lan dang nhap sai !")
+            }
         }
         const validPassword = await bcrypt.compare(password, user.rows[0].user_password)
-
         if (!validPassword) {
-            return res.status(401).json("Password khong dung !")
+            await pool.query("UPDATE users SET check_login = check_login +1 WHERE user_email = $1", [email])
+            if (check_count.rows[0].check_login >= 5) {
+                await pool.query("UPDATE users SET status = 0 WHERE user_email = $1", [email])
+            }
+
+            res.status(403).send("Password khong dung !")
         }
-        const token = jwtGenerator(user.rows[0].user_id)
-        return res.json({ token })
+
+        else {
+            const token = jwtGenerator(user.rows[0].user_id)
+            return res.json({ token })
+        }
 
 
 
@@ -76,32 +83,39 @@ router.get("/check-token", auth, async (req, res) => {
     try {
         res.json(true)
     } catch (err) {
-        console.error(err.message)
+        //console.error(err.message)
         res.status(500).send("Sever Error")
     }
 })
 
 router.post("/sent_mail", async (req, res) => {
     const { email } = req.body
-
     try {
 
         const user = await pool.query("SELECT * FROM users WHERE user_email = $1", [
             email
         ])
         if (user.rows.length !== 0) {
-            res.status(200).send("Email da ton tai tren he thong ban cos the check email de doi mat khau !")
+            const check = await pool.query("SELECT token FROM users WHERE user_email = $1", [
+                email
+            ])
+            //console.log(check.rows[0].token);
+            if (check.rows[0].token == null) {
+                const token_reset = jwtGenerator((user.rows[0].user_email));
+                pool.query("update users set token = ($1) where user_email=($2)", [
+                    token_reset, email
+                ])
+
+                sendmail(email, '<form action="http://localhost:3456/auth/reset-password/" method="POST"><input type="text" value="' + token_reset + '" name="token"/><br><label for="fname">Nhập mật khẩu mới</label><br><input type="text" name="newPassword"><br><label for="lname">Nhập lại mật khẩu</label><br><input type="text" name="passwordnew_confirm"><button type="submit">Đổi mật khẩu</button></form>')
+                res.status(200).send("Vui long kiem tra email de doi password !")
+
+            } {
+                res.status(400).send("Yeu cau cua ban da duoc thuc hien truoc do !")
+            }
+
         } else {
             res.status(400).send("Email khong ton tai !")
         }
-        const token_reset = jwtGenerator((user.rows[0].user_email));
-
-         pool.query("update users set token = ($1) where user_email=($2)", [
-            token_reset, email
-        ])
-        console.log(token_reset);
-
-        sendmail(email, '<form action="http://localhost:3456/auth/reset-password/" method="POST"><input type="text" value="'+token_reset+'" name="token"/><br><label for="fname">Nhập mật khẩu mới</label><br><input type="text" name="newPassword"><br><label for="lname">Nhập lại mật khẩu</label><br><input type="text" name="passwordnew_confirm"><button type="submit">Đổi mật khẩu</button></form>')
 
     } catch (err) {
         console.error(err.message)
@@ -109,8 +123,8 @@ router.post("/sent_mail", async (req, res) => {
 })
 
 router.post("/reset-password", async (req, res) => {
-    const {token_ ,newPassword, passwordnew_confirm } = req.body
-    console.log(token_);
+    const { token_, newPassword, passwordnew_confirm } = req.body
+    //console.log(token_);
     const check_token = await pool.query("SELECT user_id FROM users WHERE token = $1 and status = 1", [
         token_
     ])
@@ -134,11 +148,7 @@ router.post("/reset-password", async (req, res) => {
             res.status(400).send("Xac nhan mat khau khong dung !")
         }
 
-
-
     }
-
-
 })
 
 
