@@ -48,14 +48,15 @@ router.post("/login", validinfo, async (req, res) => {
 
         const user = await pool.query("SELECT*FROM users WHERE user_email = $1 AND status = 1", [email])
         const check_count = await pool.query("SELECT check_login FROM users WHERE user_email = $1", [email])
+        
         if (user.rows.length === 0) {
             await pool.query("UPDATE users SET check_login = check_login +1 WHERE user_email = $1", [email])
-            res.status(402).send("Email khong dung hoac tai khoan chua duoc kich hoat !")
-            if (check_count.rows[0].check_login >= 5) {
-                //console.log(check_count.rows);
-                await pool.query("UPDATE users SET status = 0 WHERE user_email = $1", [email])
-                return res.status(403).send("Tai khoan ban da bi khoa vi vuot qua so lan dang nhap sai !")
-            }
+            res.status(403).send("Email khong dung hoac tai khoan chua duoc kich hoat !")
+        }
+        if (check_count.rows[0].check_login >= 5) {
+            //console.log(check_count.rows);
+            await pool.query("UPDATE users SET status = 0 WHERE user_email = $1", [email])
+            return res.status(403).send("Tai khoan ban da bi khoa vi vuot qua so lan dang nhap sai !")
         }
         const validPassword = await bcrypt.compare(password, user.rows[0].user_password)
         if (!validPassword) {
@@ -66,14 +67,11 @@ router.post("/login", validinfo, async (req, res) => {
 
             res.status(403).send("Password khong dung !")
         }
-
         else {
+            await pool.query("UPDATE users SET check_login = 0 WHERE user_email = $1",[email])
             const token = jwtGenerator(user.rows[0].user_id)
             return res.json({ token })
         }
-
-
-
     } catch (err) {
         console.error(err.message)
     }
